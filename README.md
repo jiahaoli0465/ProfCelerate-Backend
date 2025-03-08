@@ -151,3 +151,95 @@ werkzeug
 ## 📝 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🔄 Grading Workflow
+
+### 1. Submission Processing
+
+```mermaid
+graph TD
+    A[File Upload] --> B{File Type Check}
+    B -->|PDF| C[Mistral OCR Processing]
+    B -->|Text| D[Direct Text Processing]
+    C --> E[Content Extraction]
+    D --> E
+    E --> F[Text Enhancement]
+    F --> G[DeepSeek Grading]
+    G --> H[Store Results]
+```
+
+### 2. Detailed Process Flow
+
+1. **File Reception** (`/api/grade`)
+
+   - Receives files via multipart form data
+   - Validates submission ID and grading criteria
+   - Creates temporary files for processing
+
+2. **Content Extraction**
+
+   - PDF Files:
+     ```python
+     # Using Mistral's OCR
+     content = await mistral_processor.process_pdf(file_path)
+     # Fallback to PyPDF2 if OCR fails
+     content = extract_with_pypdf2(file_path)
+     ```
+   - Text Files:
+     ```python
+     content = await mistral_processor.process_text(raw_content)
+     ```
+
+3. **Grading Process** (`DeepSeekGrader`)
+
+   ```python
+   {
+     "results": [
+       {
+         "question": "Aspect [points]",
+         "mistakes": ["Areas for improvement"],
+         "score": "Earned points",
+         "feedback": "Detailed explanation"
+       }
+     ],
+     "totalScore": "Total points earned",
+     "overallFeedback": "Comprehensive feedback"
+   }
+   ```
+
+4. **Result Storage**
+   - Stores in Supabase `submission_results` table:
+     - Original file content (base64)
+     - Grading results
+     - Submission metadata
+     - Timestamps
+
+### 3. Error Handling
+
+1. **OCR Processing**
+
+   - Primary: Mistral OCR
+   - Fallback: PyPDF2 text extraction
+   - Final Fallback: Error report in results
+
+2. **Grading**
+
+   - Validates point allocations
+   - Ensures total score ≤ maximum points
+   - Handles partial credit scenarios
+
+3. **Status Updates**
+   ```python
+   status = {
+     'completed': 'All files processed successfully',
+     'partial': 'Some files failed',
+     'failed': 'No files processed'
+   }
+   ```
+
+### 4. Performance Optimizations
+
+- Concurrent file processing
+- Temporary file cleanup
+- Efficient base64 encoding
+- Status tracking for long operations
