@@ -7,7 +7,7 @@ from werkzeug.utils import secure_filename
 import asyncio
 from supabase import create_client, Client
 from typing import Optional, Dict, Any, List, Tuple
-from autograder import grade_file
+from autograder import process_submission
 from dotenv import load_dotenv
 
 # Initialize app
@@ -106,12 +106,20 @@ async def grade_submission():
         form = await request.form
         files = await request.files
         
-        # Convert to dictionaries for easier handling
+        # Convert form data to dictionary
         form_data = dict(form)
-        files_dict = dict(files)
+        
+        # Get all files with the key 'files' using getlist
+        files_dict = {}
+        file_counter = 0
+        # files.getlist returns all files with the same key
+        for file in files.getlist('files'):
+            files_dict[f'file_{file_counter}'] = file
+            file_counter += 1
         
         print(f"Received form data: {form_data}")
         print(f"Received files: {[f.filename for f in files_dict.values()]}")
+        print(f"Number of files received: {len(files_dict)}")
         
         # Basic validation
         if not files_dict:
@@ -144,89 +152,61 @@ async def grade_submission():
         except ValueError:
             total_points = 100
             
-        # Update submission status to grading
+        # Update submission status to grading (don't await Supabase operations)
         try:
             supabase.from_('submissions').update(
                 {'status': 'grading'}
             ).eq('id', submission_id).execute()
         except Exception as e:
             print(f"Error updating submission status: {str(e)}")
-        
-        # Process files one by one
-        results = []
-        errors = []
-        
-        for file_key, file in files_dict.items():
-            if not file.filename:
-                continue
-                
-            temp_path = None
-            try:
-                # Save file to temp location
-                temp_path = await save_file_to_temp(file)
-                
-                # Grade the file
-                result = await grade_file(
-                    temp_path,
-                    grading_criteria,
-                    submission_id,
-                    total_points,
-                    supabase
-                )
-                
-                if result:
-                    results.append(result)
-                    
-            except Exception as e:
-                print(f"Error processing file {file.filename}: {str(e)}")
-                errors.append({
-                    "file": file.filename,
-                    "error": str(e)
-                })
-            finally:
-                # Clean up temp file
-                if temp_path and os.path.exists(temp_path):
-                    try:
-                        os.remove(temp_path)
-                    except Exception as e:
-                        print(f"Error removing temp file: {str(e)}")
-        
-        # Update submission status based on results
-        status = 'completed'
-        if not results:
-            status = 'failed'
-        elif errors:
-            status = 'partial'
-            
+
+        # Process all files concurrently
         try:
+            results = await process_submission(
+                files_dict,
+                grading_criteria,
+                submission_id,
+                total_points,
+                supabase
+            )
+            
+            print(f"Results received from process_submission: {json.dumps(results, indent=2)}")
+            print(f"Number of results: {len(results)}")
+            
+            # Update submission status to completed (don't await Supabase operations)
             supabase.from_('submissions').update(
-                {'status': status}
+                {'status': 'completed'}
             ).eq('id', submission_id).execute()
+            
+            return create_json_response({
+                "success": True,
+                "data": results,
+                "status": "completed",
+                "message": "Grading completed successfully"
+            })
+            
         except Exception as e:
-            print(f"Error updating submission status: {str(e)}")
-        
-        # Return response
-        if not results and errors:
+            error_message = str(e)
+            print(f"Error processing submission: {error_message}")
+            
+            # Update submission status to failed (don't await Supabase operations)
+            supabase.from_('submissions').update(
+                {'status': 'failed'}
+            ).eq('id', submission_id).execute()
+            
             return create_json_response({
                 "error": "Processing error",
-                "message": "All files failed processing",
-                "details": errors
+                "message": error_message,
+                "details": "Failed to process submission"
             }, 500)
             
-        return create_json_response({
-            "success": True,
-            "data": results,
-            "errors": errors if errors else None,
-            "status": status,
-            "message": f"Grading completed with status: {status}"
-        })
-        
     except Exception as e:
-        print(f"Unexpected error in grade_submission: {str(e)}")
+        error_message = str(e)
+        print(f"Unexpected error in grade_submission: {error_message}")
         return create_json_response({
             "error": "Server error",
             "message": "An unexpected error occurred",
-            "details": str(e)
+            "details": error_message
         }, 500)
 
 if __name__ == '__main__':

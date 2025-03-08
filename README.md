@@ -11,7 +11,7 @@ A Quart-based backend service for the Chinese learning platform, featuring PDF p
 - Virtual environment (recommended)
 - Supabase account and project
 - DeepSeek API key
-- Mistral API key
+- Mistral API key (Free tier or paid plan)
 
 ### Environment Setup
 
@@ -65,20 +65,32 @@ The server will start on `http://localhost:5000` by default.
 
 - `POST /api/grade`: Submit and grade assignments
   - Request: Multipart form data
-    - `files`: PDF or text files to grade
+    - `files`: Multiple PDF or text files to grade
     - `gradingCriteria`: Grading rubric
     - `submissionId`: Unique submission identifier
     - `totalPointsAvailable`: Maximum points (default: 100)
-  - Response: Grading results with detailed feedback
+  - Response: Array of grading results with detailed feedback for each file
 
 ## 🔧 Core Components
 
-### PDF Processing
+### PDF Processing System
 
-- Handles PDF file uploads
-- OCR processing using Mistral API
-- Fallback to PyPDF2 for text extraction
-- Supports both text and image-based PDFs
+#### Batch Processing
+
+- Supports processing multiple PDFs concurrently
+- Uses Mistral's batch API for efficient processing (paid plan)
+- Automatic fallback to sequential processing (free tier)
+- Multiple fallback layers for reliability:
+  1. Batch OCR processing
+  2. Sequential OCR processing
+  3. PyPDF2 text extraction
+
+#### OCR and Text Processing
+
+- Primary: Mistral OCR API for image-based PDFs
+- Secondary: PyPDF2 for text-based PDFs
+- Supports both single and multi-page documents
+- Maintains text structure and formatting
 
 ### AI Grading System
 
@@ -87,11 +99,30 @@ The server will start on `http://localhost:5000` by default.
 - Point-based rubric support
 - Partial credit handling
 
-### Mistral Integration
+### File Processing Pipeline
 
-- OCR capabilities for image-based PDFs
-- Document understanding and analysis
-- Text content processing and enhancement
+```mermaid
+graph TD
+    A[File Upload] --> B[Save Temporary Files]
+    B --> C{File Type}
+    C -->|PDF| D[PDF Processing]
+    C -->|Text| E[Text Processing]
+
+    D --> F{Batch Processing}
+    F -->|Success| G[Process Batch]
+    F -->|Fail| H[Sequential Processing]
+    H -->|Fail| I[PyPDF2 Fallback]
+
+    E --> J[Text Enhancement]
+    G --> K[Content Analysis]
+    H --> K
+    I --> K
+    J --> K
+
+    K --> L[Grading]
+    L --> M[Store Results]
+    M --> N[Cleanup]
+```
 
 ## 📦 Project Structure
 
@@ -105,141 +136,137 @@ backend/
 └── .env               # Environment variables
 ```
 
-## 🔍 Dependencies
+## 🔍 Key Features
 
-Key dependencies from requirements.txt:
+### Batch Processing
 
+```python
+# Mistral batch processing for multiple PDFs
+async def process_pdfs_batch(file_paths):
+    # Upload files for OCR
+    # Process in batch
+    # Handle results
 ```
-quart
-quart-cors
-python-dotenv
-supabase
-mistralai
-werkzeug
+
+### Sequential Fallback
+
+```python
+# Fallback for free tier or batch failures
+async def process_pdf(file_path):
+    # Process single file
+    # Return results
 ```
 
-## 🐛 Common Issues
+### Error Handling
 
-### API Keys
+```python
+try:
+    # Attempt batch processing
+except BatchError:
+    # Fall back to sequential
+except ProcessingError:
+    # Fall back to PyPDF2
+except Exception:
+    # Return structured error
+```
 
-- Ensure all API keys are correctly set in `.env`
-- Verify DeepSeek API key has sufficient credits
-- Check Mistral API key permissions for OCR
+## 🐛 Common Issues & Solutions
+
+### API Limitations
+
+#### Mistral API
+
+- Free Tier:
+  - Limited batch processing
+  - Use sequential processing fallback
+- Paid Plan:
+  - Full batch processing support
+  - Higher rate limits
+
+#### Error Codes
+
+- 422: Invalid endpoint configuration
+- 429: Rate limit exceeded
+- 403: Free trial limitations
 
 ### File Processing
 
-- Ensure PDF files are properly formatted
-- Check file size limits
-- Verify file permissions
+- Maximum file size: 10MB per file
+- Supported formats:
+  - PDF (text and image-based)
+  - Text files (.txt)
+- Common errors:
+  - Empty files
+  - Corrupted PDFs
+  - Unsupported formats
 
-### Supabase Connection
+### Performance Optimization
 
-- Verify Supabase URL and service role key
-- Check database table permissions
-- Ensure required tables exist:
-  - profiles
-  - submissions
-  - submission_results
+- Temporary file management
+- Concurrent processing
+- Efficient error handling
+- Automatic cleanup
 
 ## 🔐 Security Notes
 
-- Use environment variables for all sensitive data
-- Keep API keys secure and never commit them
-- Use service role key for Supabase, not anon key
-- Implement proper file validation and sanitization
+- API key protection
+- File validation
+- Secure file handling
+- Temporary file cleanup
+- Base64 encoding for storage
 
 ## 📝 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 🔄 Grading Workflow
+## 🔄 Processing Workflow
 
-### 1. Submission Processing
+### 1. File Reception
 
-```mermaid
-graph TD
-    A[File Upload] --> B{File Type Check}
-    B -->|PDF| C[Mistral OCR Processing]
-    B -->|Text| D[Direct Text Processing]
-    C --> E[Content Extraction]
-    D --> E
-    E --> F[Text Enhancement]
-    F --> G[DeepSeek Grading]
-    G --> H[Store Results]
-```
+- Validate files and parameters
+- Create temporary storage
+- Initialize processing pipeline
 
-### 2. Detailed Process Flow
+### 2. Processing Strategy
 
-1. **File Reception** (`/api/grade`)
+1. **Batch Processing** (Paid Plan)
 
-   - Receives files via multipart form data
-   - Validates submission ID and grading criteria
-   - Creates temporary files for processing
+   - Multiple files in single API call
+   - Efficient resource usage
+   - Faster processing time
 
-2. **Content Extraction**
+2. **Sequential Processing** (Free Tier)
 
-   - PDF Files:
-     ```python
-     # Using Mistral's OCR
-     content = await mistral_processor.process_pdf(file_path)
-     # Fallback to PyPDF2 if OCR fails
-     content = extract_with_pypdf2(file_path)
-     ```
-   - Text Files:
-     ```python
-     content = await mistral_processor.process_text(raw_content)
-     ```
+   - One file at a time
+   - Reliable but slower
+   - Better error handling
 
-3. **Grading Process** (`DeepSeekGrader`)
+3. **Fallback Mechanism**
+   - PyPDF2 text extraction
+   - Structured error reporting
+   - Graceful degradation
 
-   ```python
-   {
-     "results": [
-       {
-         "question": "Aspect [points]",
-         "mistakes": ["Areas for improvement"],
-         "score": "Earned points",
-         "feedback": "Detailed explanation"
-       }
-     ],
-     "totalScore": "Total points earned",
-     "overallFeedback": "Comprehensive feedback"
-   }
-   ```
+### 3. Result Management
 
-4. **Result Storage**
-   - Stores in Supabase `submission_results` table:
-     - Original file content (base64)
-     - Grading results
-     - Submission metadata
-     - Timestamps
+- Store in Supabase
+- Clean up resources
+- Return structured response
 
-### 3. Error Handling
+## 🚀 Performance Tips
 
-1. **OCR Processing**
+1. **Batch Processing**
 
-   - Primary: Mistral OCR
-   - Fallback: PyPDF2 text extraction
-   - Final Fallback: Error report in results
+   - Use paid plan for multiple files
+   - Configure optimal batch sizes
+   - Monitor API limits
 
-2. **Grading**
+2. **Error Handling**
 
-   - Validates point allocations
-   - Ensures total score ≤ maximum points
-   - Handles partial credit scenarios
+   - Implement all fallbacks
+   - Log processing steps
+   - Maintain result structure
 
-3. **Status Updates**
-   ```python
-   status = {
-     'completed': 'All files processed successfully',
-     'partial': 'Some files failed',
-     'failed': 'No files processed'
-   }
-   ```
-
-### 4. Performance Optimizations
-
-- Concurrent file processing
-- Temporary file cleanup
-- Efficient base64 encoding
-- Status tracking for long operations
+3. **Resource Management**
+   - Clean temporary files
+   - Monitor memory usage
+   - Optimize concurrent operations
