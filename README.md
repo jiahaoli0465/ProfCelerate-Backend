@@ -1,6 +1,6 @@
 # Chinese Learning Platform Backend
 
-A Flask-based backend service for the Chinese learning platform, featuring PDF processing, voice recording analysis, and AI-powered grading using DeepSeek's API.
+A Quart-based backend service for the Chinese learning platform, featuring PDF processing with OCR capabilities, and AI-powered grading using DeepSeek and Mistral APIs.
 
 ## 🚀 Quick Start
 
@@ -9,9 +9,9 @@ A Flask-based backend service for the Chinese learning platform, featuring PDF p
 - Python 3.8+
 - pip (Python package manager)
 - Virtual environment (recommended)
-- PostgreSQL database
+- Supabase account and project
 - DeepSeek API key
-- Mistral API key (for OCR capabilities)
+- Mistral API key
 
 ### Environment Setup
 
@@ -31,10 +31,11 @@ pip install -r requirements.txt
 3. Create a `.env` file in the backend directory:
 
 ```env
-DATABASE_URL=postgresql://username:password@localhost:5432/dbname
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 DEEPSEEK_API_KEY=your_deepseek_api_key
 MISTRAL_API_KEY=your_mistral_api_key
-FLASK_ENV=development
+PORT=5000  # Optional, defaults to 5000
 ```
 
 ### Running the Server
@@ -49,107 +50,103 @@ The server will start on `http://localhost:5000` by default.
 
 ## 📚 API Documentation
 
-### Authentication Endpoints
+### Test Endpoint
 
-- `POST /auth/login`: User login
-- `POST /auth/register`: User registration
-- `POST /auth/logout`: User logout
+- `GET /api/test`: Verify backend is running
+  - Response: `{"message": "Backend is running successfully!"}`
 
-### Assignment Endpoints
+### Profile Endpoints
 
-- `GET /assignments`: List all assignments
-- `POST /assignments`: Create new assignment
-- `GET /assignments/<id>`: Get assignment details
-- `PUT /assignments/<id>`: Update assignment
-- `DELETE /assignments/<id>`: Delete assignment
+- `GET /api/profile/<user_id>`: Get or create user profile
+  - Creates new profile if none exists
+  - Returns profile data and success message
 
-### Submission Endpoints
+### Grading Endpoints
 
-- `POST /submissions`: Submit assignment
-- `GET /submissions/<id>`: Get submission details
-- `POST /submissions/<id>/grade`: Grade submission
+- `POST /api/grade`: Submit and grade assignments
+  - Request: Multipart form data
+    - `files`: PDF or text files to grade
+    - `gradingCriteria`: Grading rubric
+    - `submissionId`: Unique submission identifier
+    - `totalPointsAvailable`: Maximum points (default: 100)
+  - Response: Grading results with detailed feedback
 
 ## 🔧 Core Components
 
 ### PDF Processing
 
 - Handles PDF file uploads
-- Extracts text content
-- Supports OCR for image-based PDFs using Mistral
-
-### Voice Recording
-
-- Processes audio file submissions
-- Supports common audio formats (MP3, WAV)
-- Integrates with speech recognition
+- OCR processing using Mistral API
+- Fallback to PyPDF2 for text extraction
+- Supports both text and image-based PDFs
 
 ### AI Grading System
 
-- Uses DeepSeek API for intelligent grading
-- Supports point-based rubrics
-- Provides detailed feedback and scoring
+- Primary grading using DeepSeek API
+- Structured feedback and scoring
+- Point-based rubric support
+- Partial credit handling
 
-## 🧪 Testing
+### Mistral Integration
 
-Run the test suite:
-
-```bash
-pytest
-```
-
-Run tests with coverage:
-
-```bash
-pytest --cov=. tests/
-```
-
-## 🔍 Code Style
-
-This project follows PEP 8 guidelines. Format your code using:
-
-```bash
-black .
-flake8 .
-```
+- OCR capabilities for image-based PDFs
+- Document understanding and analysis
+- Text content processing and enhancement
 
 ## 📦 Project Structure
 
 ```
 backend/
 ├── app.py              # Main application entry
-├── config.py           # Configuration settings
+├── autograder.py       # File processing and grading logic
+├── deepseek_grader.py  # DeepSeek API integration
+├── mistral_processor.py # Mistral API integration
 ├── requirements.txt    # Dependencies
-├── tests/             # Test suite
-├── models/            # Database models
-├── routes/            # API endpoints
-├── services/          # Business logic
-│   ├── pdf_service.py
-│   ├── voice_service.py
-│   └── grading_service.py
-└── utils/             # Helper functions
+└── .env               # Environment variables
 ```
 
-## 🤝 Contributing
+## 🔍 Dependencies
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+Key dependencies from requirements.txt:
+
+```
+quart
+quart-cors
+python-dotenv
+supabase
+mistralai
+werkzeug
+```
 
 ## 🐛 Common Issues
 
-### Database Connection
-
-- Ensure PostgreSQL is running
-- Verify database credentials in `.env`
-- Check database permissions
-
 ### API Keys
 
-- Verify DeepSeek API key is valid
-- Ensure Mistral API key has sufficient credits
-- Check environment variables are loaded correctly
+- Ensure all API keys are correctly set in `.env`
+- Verify DeepSeek API key has sufficient credits
+- Check Mistral API key permissions for OCR
+
+### File Processing
+
+- Ensure PDF files are properly formatted
+- Check file size limits
+- Verify file permissions
+
+### Supabase Connection
+
+- Verify Supabase URL and service role key
+- Check database table permissions
+- Ensure required tables exist:
+  - profiles
+  - submissions
+  - submission_results
+
+## 🔐 Security Notes
+
+- Use environment variables for all sensitive data
+- Keep API keys secure and never commit them
+- Use service role key for Supabase, not anon key
+- Implement proper file validation and sanitization
 
 ## 📝 License
 
