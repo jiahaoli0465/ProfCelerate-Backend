@@ -16,8 +16,20 @@ deepseek_grader = DeepSeekGrader()
 def save_temp_file(file_data):
     """Save file data to a temporary file and return its path."""
     temp_dir = tempfile.gettempdir()
-    temp_path = os.path.join(temp_dir, f"temp_{secure_filename(file_data.filename)}")
-    file_data.save(temp_path)
+    # Get original filename but ensure it's secure
+    original_filename = secure_filename(file_data.filename)
+    # Generate a unique filename while preserving the original name
+    temp_path = os.path.join(temp_dir, original_filename)
+    # If file exists, add a number to make it unique
+    counter = 1
+    while os.path.exists(temp_path):
+        name, ext = os.path.splitext(original_filename)
+        temp_path = os.path.join(temp_dir, f"{name}_{counter}{ext}")
+        counter += 1
+    
+    # Save the file in binary mode to preserve file integrity
+    with open(temp_path, 'wb') as f:
+        file_data.save(f)
     return temp_path
 
 async def process_pdf_with_mistral(file_path):
@@ -79,16 +91,19 @@ async def grade_file(file_path, grading_criteria, submission_id, total_points_av
     try:
         # Get original file name and content
         file_name = os.path.basename(file_path)
+        
+        # Read file content in binary mode to preserve file integrity
         with open(file_path, 'rb') as file:
-            file_content = base64.b64encode(file.read()).decode('utf-8') if file_path.endswith('.pdf') else file.read()
+            file_content = base64.b64encode(file.read()).decode('utf-8')
 
         # Extract content based on file type
         if file_path.endswith('.pdf'):
             # Process PDF using Mistral's OCR and document understanding
             content = await process_pdf_with_mistral(file_path)
+            print('extracted content from pdf', content)
         else:
             # For non-PDF files, read and process the content with Mistral
-            with open(file_path, 'r') as file:
+            with open(file_path, 'r', encoding='utf-8') as file:
                 raw_content = file.read()
                 content = await process_with_mistral(raw_content)
 
@@ -99,12 +114,14 @@ async def grade_file(file_path, grading_criteria, submission_id, total_points_av
             total_points_available
         )
 
+        print('grading result', grading_result)
+
         # Store the result in Supabase
         try:
             await store_grading_result(
                 supabase,
                 submission_id,
-                file_name,
+                file_name,  # Use original filename
                 file_content,
                 grading_result
             )
@@ -114,7 +131,7 @@ async def grade_file(file_path, grading_criteria, submission_id, total_points_av
 
         # Return the grading result
         return {
-            "fileName": file_name,
+            "fileName": file_name,  # Use original filename
             **grading_result
         }
 

@@ -27,27 +27,30 @@ class DeepSeekGrader:
                     {"role": "system", "content": """You are an expert grader. When grading submissions, first analyze the content and criteria carefully, then provide your response in two sections:
 
 <reasoning>
-Think through how the submission meets or fails to meet each criterion. Consider specific strengths and weaknesses.
+1. Break down each aspect/question from the grading criteria
+2. Evaluate how well the submission meets each criterion
+3. Justify point allocations based on the defined rubric
+4. Consider partial credit where appropriate
 </reasoning>
 
 <response>
 {
     "results": [
         {
-            "question": "Question or aspect being graded",
-            "mistakes": ["List of specific mistakes found"],
-            "score": number,
-            "feedback": "Detailed, constructive feedback"
+            "question": "Question/Aspect being graded [point value]",
+            "mistakes": ["List of specific mistakes or areas for improvement"],
+            "score": number (based on rubric point allocation),
+            "feedback": "Detailed, constructive feedback explaining point allocation"
         }
     ],
-    "totalScore": number,
-    "overallFeedback": "Comprehensive overall feedback"
+    "totalScore": number (sum of all scores),
+    "overallFeedback": "Comprehensive overall feedback with suggestions for improvement"
 }
 </response>
 
 Your JSON response must be within the <response> tags and follow the exact format shown above.
-Be thorough in your grading and provide specific, actionable feedback."""},
-                    {"role": "user", "content": f"""Please grade this submission:
+Be thorough in your grading and provide specific, actionable feedback for each aspect."""},
+                    {"role": "user", "content": f"""Please grade this submission according to the following rubric:
 
 Grading Criteria:
 {grading_criteria}
@@ -55,7 +58,13 @@ Grading Criteria:
 Total Points Available: {total_points_available}
 
 Submission Content:
-{content}"""}
+{content}
+
+Remember to:
+1. Grade each aspect according to its defined point values
+2. Provide specific feedback for point deductions
+3. Consider partial credit based on the rubric
+4. Ensure total score doesn't exceed {total_points_available} points"""}
                 ],
                 temperature=0.3,
                 max_tokens=2000

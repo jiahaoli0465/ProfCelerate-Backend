@@ -49,27 +49,30 @@ class MistralProcessor:
 
             if not ocr_text.strip():
                 raise ValueError("No text content could be extracted from OCR response")
+            
+            print('ocr_text', ocr_text)
 
             # Extract content using document understanding
-            chat_response = await self.client.chat.complete_async(
-                model="mistral-large-latest",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert at understanding and analyzing document content. Please process the following OCR text to extract key information, maintain structure, and improve readability."
-                    },
-                    {
-                        "role": "user",
-                        "content": ocr_text
-                    }
-                ]
-            )
+            # chat_response = await self.client.chat.complete_async(
+            #     model="mistral-large-latest",
+            #     messages=[
+            #         {
+            #             "role": "system",
+            #             "content": "You are an expert at understanding and analyzing document content. Please process the following OCR text to extract key information, maintain structure, and improve readability."
+            #         },
+            #         {
+            #             "role": "user",
+            #             "content": ocr_text
+            #         }
+            #     ]
+            # )
 
             # Clean up the uploaded file
             await self.client.files.delete_async(file_id=uploaded_file.id)
             
             print("Mistral OCR processing complete")
-            return chat_response.choices[0].message.content
+            # return chat_response.choices[0].message.content
+            return ocr_text
 
         except Exception as e:
             print(f"Error processing PDF with Mistral: {str(e)}")
