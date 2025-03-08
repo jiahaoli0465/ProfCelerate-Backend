@@ -6,9 +6,7 @@ import os
 from quart import Quart
 from quart_cors import cors
 from autograder import process_submission
-from functools import wraps
-import time
-from typing import Dict, Any, Optional
+from typing import Optional
 
 # Load environment variables
 load_dotenv()
@@ -28,11 +26,6 @@ supabase: Client = create_client(supabase_url, supabase_key)
 # Initialize Quart app (async version of Flask)
 app = Quart(__name__)
 app = cors(app)
-
-# Rate limiting configuration
-RATE_LIMIT_WINDOW = 60  # 60 seconds
-MAX_REQUESTS = 10  # Maximum requests per window
-rate_limit_data: Dict[str, Dict[str, Any]] = {}
 
 def validate_grading_request(files, form) -> Optional[tuple]:
     """
@@ -57,60 +50,8 @@ def validate_grading_request(files, form) -> Optional[tuple]:
 
     return None
 
-def rate_limit(f):
-    """
-    Rate limiting decorator for API endpoints.
-    Limits requests based on IP address.
-    """
-    @wraps(f)
-    async def decorated_function(*args, **kwargs):
-        # Get client IP
-        ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-        current_time = time.time()
-
-        # Initialize or clean up rate limit data for this IP
-        if ip not in rate_limit_data:
-            rate_limit_data[ip] = {
-                'requests': [],
-                'blocked_until': None
-            }
-
-        # Clean up old requests
-        rate_limit_data[ip]['requests'] = [
-            req_time for req_time in rate_limit_data[ip]['requests']
-            if current_time - req_time < RATE_LIMIT_WINDOW
-        ]
-
-        # Check if client is blocked
-        if rate_limit_data[ip].get('blocked_until'):
-            if current_time < rate_limit_data[ip]['blocked_until']:
-                wait_time = int(rate_limit_data[ip]['blocked_until'] - current_time)
-                return jsonify({
-                    "error": "Rate limit exceeded",
-                    "message": f"Too many requests. Please try again in {wait_time} seconds.",
-                    "wait_time": wait_time
-                }), 429
-            else:
-                rate_limit_data[ip]['blocked_until'] = None
-
-        # Check rate limit
-        if len(rate_limit_data[ip]['requests']) >= MAX_REQUESTS:
-            rate_limit_data[ip]['blocked_until'] = current_time + RATE_LIMIT_WINDOW
-            return jsonify({
-                "error": "Rate limit exceeded",
-                "message": f"Too many requests. Please try again in {RATE_LIMIT_WINDOW} seconds.",
-                "wait_time": RATE_LIMIT_WINDOW
-            }), 429
-
-        # Add current request timestamp
-        rate_limit_data[ip]['requests'].append(current_time)
-
-        return await f(*args, **kwargs)
-    return decorated_function
-
 # Autograder endpoint
 @app.route('/api/grade', methods=['POST'])
-@rate_limit
 async def grade_submission():
     try:
         files = await request.files
@@ -182,13 +123,11 @@ async def grade_submission():
 
 # Test endpoint
 @app.route('/api/test', methods=['GET'])
-@rate_limit
 async def test():
     return jsonify({"message": "Backend is running successfully!"})
 
 # Get user profile endpoint
 @app.route('/api/profile/<user_id>', methods=['GET'])
-@rate_limit
 async def get_profile(user_id):
     try:
         if user_id == 'undefined' or not user_id:
