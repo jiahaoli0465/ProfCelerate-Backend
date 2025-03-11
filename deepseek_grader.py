@@ -3,6 +3,7 @@ import os
 import json
 from typing import Dict, Any
 from dotenv import load_dotenv
+import asyncio
 
 class DeepSeekGrader:
     def __init__(self):
@@ -21,10 +22,16 @@ class DeepSeekGrader:
     async def grade_submission(self, content: str, grading_criteria: str, total_points_available: float) -> Dict[str, Any]:
         """Grade content using DeepSeek's API."""
         try:
-            response = self.client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
-                    {"role": "system", "content": """You are an expert grader. When grading submissions, first analyze the content and criteria carefully, then provide your response in two sections:
+            # Use run_in_executor to run the synchronous OpenAI call in a thread pool
+            # This allows multiple API calls to happen concurrently without blocking
+            loop = asyncio.get_event_loop()
+            
+            # Define the API call as a separate function for clarity
+            def make_api_call():
+                return self.client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[
+                        {"role": "system", "content": """You are an expert grader. When grading submissions, first analyze the content and criteria carefully, then provide your response in two sections:
 
 <reasoning>
 1. Break down each aspect/question from the grading criteria
@@ -50,7 +57,7 @@ class DeepSeekGrader:
 
 Your JSON response must be within the <response> tags and follow the exact format shown above.
 Be thorough in your grading and provide specific, actionable feedback for each aspect."""},
-                    {"role": "user", "content": f"""Please grade this submission according to the following rubric:
+                        {"role": "user", "content": f"""Please grade this submission according to the following rubric:
 
 Grading Criteria:
 {grading_criteria}
@@ -65,10 +72,13 @@ Remember to:
 2. Provide specific feedback for point deductions
 3. Consider partial credit based on the rubric
 4. Ensure total score doesn't exceed {total_points_available} points"""}
-                ],
-                temperature=0.3,
-                max_tokens=2000
-            )
+                    ],
+                    temperature=0.3,
+                    max_tokens=2000
+                )
+            
+            # Run the API call in a thread pool
+            response = await loop.run_in_executor(None, make_api_call)
             
             return self._parse_grading_response(response.choices[0].message.content, total_points_available)
         except Exception as e:

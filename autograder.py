@@ -14,30 +14,74 @@ mistral_processor = MistralProcessor()
 deepseek_grader = DeepSeekGrader()
 
 async def save_temp_file(file_data):
-    """Save file data to a temporary file and return its path."""
+    """Save file data to a temporary file and return its path.
+    
+    Handles both file objects (with filename attribute) and 
+    raw text content (string) for text files.
+    """
     try:
         temp_dir = tempfile.gettempdir()
-        # Get original filename but ensure it's secure
-        original_filename = secure_filename(file_data.filename)
-        # Generate a unique filename while preserving the original name
-        temp_path = os.path.join(temp_dir, original_filename)
-        # If file exists, add a number to make it unique
-        counter = 1
-        while os.path.exists(temp_path):
-            name, ext = os.path.splitext(original_filename)
-            temp_path = os.path.join(temp_dir, f"{name}_{counter}{ext}")
-            counter += 1
         
-        # Save the file in binary mode to preserve file integrity
-        await file_data.save(temp_path)
+        # Check if file_data is a string (text content) or a file object
+        if isinstance(file_data, str):
+            # For text content, create a temporary file with .txt extension
+            fd, temp_path = tempfile.mkstemp(suffix='.txt', dir=temp_dir)
+            with os.fdopen(fd, 'w') as f:
+                f.write(file_data)
+            print(f"Saved string content to temporary file: {temp_path}")
+            return temp_path
         
-        # Verify file was saved and is not empty
-        if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-            raise ValueError(f"Failed to save file or file is empty: {original_filename}")
+        # Check if file_data is a dictionary (might be from JSON)
+        elif isinstance(file_data, dict):
+            # Convert dict to JSON string and save as .txt
+            fd, temp_path = tempfile.mkstemp(suffix='.txt', dir=temp_dir)
+            with os.fdopen(fd, 'w') as f:
+                json.dump(file_data, f, indent=2)
+            print(f"Saved dictionary content to temporary file: {temp_path}")
+            return temp_path
+        
+        # Check if file_data has the expected attributes of a file object
+        elif hasattr(file_data, 'filename') and hasattr(file_data, 'save'):
+            # Handle file object with filename attribute
+            # Get original filename but ensure it's secure
+            original_filename = secure_filename(file_data.filename)
+            # Generate a unique filename while preserving the original name
+            temp_path = os.path.join(temp_dir, original_filename)
+            # If file exists, add a number to make it unique
+            counter = 1
+            while os.path.exists(temp_path):
+                name, ext = os.path.splitext(original_filename)
+                temp_path = os.path.join(temp_dir, f"{name}_{counter}{ext}")
+                counter += 1
             
-        return temp_path
+            # Save the file in binary mode to preserve file integrity
+            await file_data.save(temp_path)
+            
+            # Verify file was saved and is not empty
+            if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+                raise ValueError(f"Failed to save file or file is empty: {original_filename}")
+            
+            print(f"Saved file object to temporary file: {temp_path}")
+            return temp_path
+        
+        # Handle bytes or bytearray
+        elif isinstance(file_data, (bytes, bytearray)):
+            # For binary content, create a temporary file
+            fd, temp_path = tempfile.mkstemp(suffix='.bin', dir=temp_dir)
+            with os.fdopen(fd, 'wb') as f:
+                f.write(file_data)
+            print(f"Saved binary content to temporary file: {temp_path}")
+            return temp_path
+        
+        else:
+            # Unsupported file_data type
+            raise TypeError(f"Unsupported file data type: {type(file_data)}. Expected string, file object, dictionary, or bytes.")
+            
     except Exception as e:
         print(f"Error saving temporary file: {str(e)}")
+        print(f"Type of file_data: {type(file_data)}")
+        if hasattr(file_data, '__dict__'):
+            print(f"File data attributes: {file_data.__dict__}")
         raise
 
 async def process_pdf_with_mistral(file_path):
@@ -94,151 +138,73 @@ async def store_grading_result(supabase, submission_id, file_name, file_content,
         print(f"Error storing grading result: {str(e)}")
         return None
 
-async def grade_file(file_path, grading_criteria, submission_id, total_points_available, supabase):
-    """Grade a single file using Mistral for content processing and DeepSeek for grading."""
-    try:
-        print(f"Starting to grade file: {file_path}")
-        # Get original file name and content
-        file_name = os.path.basename(file_path)
-        
-        # Read file content in binary mode to preserve file integrity
-        with open(file_path, 'rb') as file:
-            file_bytes = file.read()
-            if len(file_bytes) == 0:
-                raise ValueError(f"File {file_name} is empty")
-                
-            # Determine MIME type based on file extension
-            mime_type = 'application/pdf' if file_path.endswith('.pdf') else 'text/plain'
-            # Create proper base64 data URL
-            file_content = f"data:{mime_type};base64,{base64.b64encode(file_bytes).decode('utf-8')}"
-            print(f"Successfully read file {file_name} ({len(file_bytes)} bytes)")
-
-        # Extract content based on file type
-        if file_path.endswith('.pdf'):
-            print(f"Processing PDF file: {file_name}")
-            # Process PDF using Mistral's OCR and document understanding
-            content = await process_pdf_with_mistral(file_path)
-            print(f"Successfully extracted content from PDF: {file_name}")
-        else:
-            print(f"Processing text file: {file_name}")
-            # For non-PDF files, read and process the content with Mistral
-            with open(file_path, 'r', encoding='utf-8') as file:
-                raw_content = file.read()
-                content = await process_with_mistral(raw_content)
-            print(f"Successfully processed text content from: {file_name}")
-
-        # Grade the content using DeepSeek
-        print(f"Starting grading for file: {file_name}")
-        grading_result = await grade_with_deepseek(
-            content,
-            grading_criteria,
-            total_points_available
-        )
-        print(f"Completed grading for file: {file_name}")
-
-        # Store the result in Supabase
-        try:
-            print(f"Storing results for file: {file_name}")
-            await store_grading_result(
-                supabase,
-                submission_id,
-                file_name,
-                file_content,
-                grading_result
-            )
-            print(f"Successfully stored results for: {file_name}")
-        except Exception as e:
-            print(f"Error storing result in Supabase for {file_name}: {str(e)}")
-            # Continue even if storage fails
-
-        # Return the grading result
-        result = {
-            "fileName": file_name,
-            **grading_result
-        }
-        print(f"Returning results for file: {file_name}")
-        return result
-
-    except Exception as e:
-        print(f"Error processing file {os.path.basename(file_path)}: {str(e)}")
-        # Return a structured error result
-        error_result = {
-            "fileName": os.path.basename(file_path),
-            "results": [
-                {
-                    "question": "Error in processing",
-                    "mistakes": ["File processing failed"],
-                    "score": 0,
-                    "feedback": f"Error: {str(e)}"
-                }
-            ],
-            "totalScore": 0,
-            "overallFeedback": f"An error occurred during processing: {str(e)}"
-        }
-        return error_result
-
 async def process_submission(files, grading_criteria, submission_id, total_points_available, supabase):
-    """Process multiple files in a submission using batch processing."""
-    temp_files = []  # Keep track of temporary files for cleanup
+    """Process a batch of files for grading
+    
+    The files parameter can be:
+    - A list of file objects (with filename attribute)
+    - A list of strings (text content)
+    - A dictionary of file objects
+    """
     try:
-        # Save files first
+        print(f"Number of files received: {len(files) if files else 0}")
+        print(f"Type of files parameter: {type(files)}")
+        
+        # Save files to temp directory
         file_paths = []
-        print(f"Starting to process {len(files)} files")
-        for file in files.values():
-            if file.filename:
-                try:
-                    temp_path = await save_temp_file(file)
-                    temp_files.append(temp_path)
-                    file_paths.append(temp_path)
-                    print(f"Successfully saved file {file.filename} to {temp_path}")
-                except Exception as e:
-                    print(f"Error saving file {file.filename}: {str(e)}")
-                    continue
-
+        
+        # Handle different types of file inputs
+        if isinstance(files, dict):
+            # Handle dictionary of files
+            for _, file_obj in files.items():
+                file_path = await save_temp_file(file_obj)
+                file_paths.append(file_path)
+        elif isinstance(files, list):
+            # Handle list of files or strings
+            for file_item in files:
+                file_path = await save_temp_file(file_item)
+                file_paths.append(file_path)
+        else:
+            # Single file or string
+            file_path = await save_temp_file(files)
+            file_paths.append(file_path)
+        
         if not file_paths:
-            raise ValueError("No valid files were saved for processing")
-
-        print(f"Processing {len(file_paths)} files in batch")
+            raise ValueError("No valid files were processed")
+            
+        print(f"Successfully saved {len(file_paths)} files for processing")
+        
+        # Process PDFs and text files
+        pdf_contents = {}
+        text_contents = {}
         
         # Separate PDF and text files
         pdf_files = [f for f in file_paths if f.endswith('.pdf')]
         text_files = [f for f in file_paths if not f.endswith('.pdf')]
         
-        # Process PDFs in batch
-        pdf_contents = {}
+        # Process PDFs if any
         if pdf_files:
             try:
-                pdf_contents = await mistral_processor.process_pdfs_batch(pdf_files)
-            except Exception as e:
-                print(f"Error in batch PDF processing: {str(e)}")
-                # Fallback to sequential processing
                 for pdf_file in pdf_files:
                     try:
-                        print(f"Processing {pdf_file} sequentially")
-                        content = await mistral_processor.process_pdf(pdf_file)
-                        pdf_contents[os.path.basename(pdf_file)] = content
-                    except Exception as seq_error:
-                        print(f"Sequential processing failed for {pdf_file}, falling back to PyPDF2: {str(seq_error)}")
-                        try:
-                            text_content = ""
-                            with open(pdf_file, 'rb') as file:
-                                pdf_reader = PyPDF2.PdfReader(file)
-                                for page in pdf_reader.pages:
-                                    text_content += page.extract_text() + "\n"
-                            pdf_contents[os.path.basename(pdf_file)] = text_content
-                        except Exception as fallback_error:
-                            print(f"Fallback extraction failed for {pdf_file}: {str(fallback_error)}")
-                            pdf_contents[os.path.basename(pdf_file)] = "Failed to extract content from PDF."
-
-        # Process text files sequentially if batch fails
-        text_contents = {}
+                        pdf_content = await process_pdf_with_mistral(pdf_file)
+                        pdf_contents[os.path.basename(pdf_file)] = pdf_content
+                    except Exception as e:
+                        print(f"Error processing PDF {pdf_file}: {str(e)}")
+                        continue
+            except Exception as e:
+                print(f"Error in PDF batch processing: {str(e)}")
+        
+        # Process text files if any
         if text_files:
             for text_file in text_files:
                 try:
-                    with open(text_file, 'r', encoding='utf-8') as file:
-                        raw_content = file.read()
-                        processed_content = await mistral_processor.process_text(raw_content)
-                        text_contents[os.path.basename(text_file)] = processed_content
+                    with open(text_file, 'r', encoding='utf-8') as f:
+                        text_content = f.read()
+                    # Process with Mistral if needed
+                    # processed_text = await process_with_mistral(text_content)
+                    # For now, just use the raw text
+                    text_contents[os.path.basename(text_file)] = text_content
                 except Exception as e:
                     print(f"Error processing text file {text_file}: {str(e)}")
                     continue
@@ -248,78 +214,145 @@ async def process_submission(files, grading_criteria, submission_id, total_point
         if not all_contents:
             raise ValueError("No content could be extracted from any files")
 
-        try:
-            processed_contents = await mistral_processor.process_texts_batch(all_contents)
-        except Exception as e:
-            print(f"Error in batch text processing: {str(e)}")
-            processed_contents = all_contents  # Use original content if processing fails
+        # try:
+        #     processed_contents = await mistral_processor.process_texts_batch(all_contents)
+        # except Exception as e:
+        #     print(f"Error in batch text processing: {str(e)}")
+        #     processed_contents = all_contents  # Use original content if processing fails
+        processed_contents = all_contents
 
-        # Grade all processed content and store results
-        results = []
-        for file_name, content in processed_contents.items():
+        # Helper function to grade and store a single file
+        async def grade_and_store(file_name, content):
+            start_time = datetime.now()
             try:
-                print(f"Grading content for: {file_name}")
+                print(f"Starting grading for: {file_name}")
                 # Grade the content
+                grade_start = datetime.now()
                 grading_result = await grade_with_deepseek(
                     content,
                     grading_criteria,
                     total_points_available
                 )
+                grade_end = datetime.now()
+                grade_duration = (grade_end - grade_start).total_seconds()
+                print(f"Grading for {file_name} completed in {grade_duration:.2f} seconds")
                 
                 # Get original file content for storage
-                original_file_path = next(f for f in file_paths if os.path.basename(f) == file_name)
-                with open(original_file_path, 'rb') as file:
-                    file_bytes = file.read()
-                    mime_type = 'application/pdf' if file_name.endswith('.pdf') else 'text/plain'
-                    file_content = f"data:{mime_type};base64,{base64.b64encode(file_bytes).decode('utf-8')}"
+                try:
+                    # Try to find the exact file path
+                    matching_files = [f for f in file_paths if os.path.basename(f) == file_name]
+                    
+                    if matching_files:
+                        original_file_path = matching_files[0]
+                    else:
+                        # If no exact match, try case-insensitive match
+                        file_name_lower = file_name.lower()
+                        matching_files = [f for f in file_paths if os.path.basename(f).lower() == file_name_lower]
+                        
+                        if matching_files:
+                            original_file_path = matching_files[0]
+                        else:
+                            # If still no match, log error and use a placeholder
+                            print(f"Warning: Could not find original file for {file_name}")
+                            # Create a placeholder file content
+                            file_content = f"data:text/plain;base64,{base64.b64encode(content.encode('utf-8')).decode('utf-8')}"
+                            
+                            # Store the result with the placeholder content
+                            store_start = datetime.now()
+                            await store_grading_result(
+                                supabase,
+                                submission_id,
+                                file_name,
+                                file_content,
+                                grading_result
+                            )
+                            store_end = datetime.now()
+                            store_duration = (store_end - store_start).total_seconds()
+                            print(f"Storing results for {file_name} completed in {store_duration:.2f} seconds")
+                            
+                            end_time = datetime.now()
+                            total_duration = (end_time - start_time).total_seconds()
+                            print(f"Total processing for {file_name} completed in {total_duration:.2f} seconds")
+                            
+                            return {
+                                "fileName": file_name,
+                                **grading_result
+                            }
+                    
+                    # Read the file content
+                    with open(original_file_path, 'rb') as file:
+                        file_bytes = file.read()
+                        mime_type = 'application/pdf' if file_name.endswith('.pdf') else 'text/plain'
+                        file_content = f"data:{mime_type};base64,{base64.b64encode(file_bytes).decode('utf-8')}"
+                
+                except Exception as file_error:
+                    print(f"Error reading original file for {file_name}: {str(file_error)}")
+                    # Create a placeholder file content
+                    file_content = f"data:text/plain;base64,{base64.b64encode(content.encode('utf-8')).decode('utf-8')}"
 
                 # Store the result
-                try:
-                    await store_grading_result(
-                        supabase,
-                        submission_id,
-                        file_name,
-                        file_content,
-                        grading_result
-                    )
-                except Exception as e:
-                    print(f"Error storing result for {file_name}: {str(e)}")
-
-                # Add to results
-                results.append({
+                store_start = datetime.now()
+                await store_grading_result(
+                    supabase,
+                    submission_id,
+                    file_name,
+                    file_content,
+                    grading_result
+                )
+                store_end = datetime.now()
+                store_duration = (store_end - store_start).total_seconds()
+                print(f"Storing results for {file_name} completed in {store_duration:.2f} seconds")
+                
+                end_time = datetime.now()
+                total_duration = (end_time - start_time).total_seconds()
+                print(f"Total processing for {file_name} completed in {total_duration:.2f} seconds")
+                
+                return {
                     "fileName": file_name,
                     **grading_result
-                })
-                print(f"Successfully processed {file_name}")
+                }
             except Exception as e:
-                print(f"Error processing {file_name}: {str(e)}")
-                results.append({
+                end_time = datetime.now()
+                total_duration = (end_time - start_time).total_seconds()
+                print(f"Error processing {file_name} after {total_duration:.2f} seconds: {str(e)}")
+                return {
                     "fileName": file_name,
-                    "results": [{
-                        "question": "Error in processing",
-                        "mistakes": ["File processing failed"],
-                        "score": 0,
-                        "feedback": f"Error: {str(e)}"
-                    }],
-                    "totalScore": 0,
-                    "overallFeedback": f"An error occurred during processing: {str(e)}"
-                })
+                    "error": str(e)
+                }
 
-        if not results:
-            raise Exception("No files were successfully processed")
-
-        return results
-
-    except Exception as e:
-        print(f"Error in process_submission: {str(e)}")
-        raise
-
-    finally:
-        # Clean up temporary files
-        for temp_path in temp_files:
+        # Create grading tasks for all files
+        print(f"Creating {len(processed_contents)} grading tasks for concurrent processing")
+        grading_tasks = []
+        for file_name, content in processed_contents.items():
+            # We don't call the coroutine here, just reference it to create a task
+            # This is the key difference - we're not awaiting it yet
+            task = grade_and_store(file_name, content)
+            grading_tasks.append(task)
+        
+        # Run all grading tasks concurrently
+        print(f"Running {len(grading_tasks)} grading tasks concurrently")
+        start_time = datetime.now()
+        results = await asyncio.gather(*grading_tasks, return_exceptions=True)
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        print(f"Completed concurrent grading in {duration:.2f} seconds")
+        
+        # Process results and handle any exceptions
+        final_results = []
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"Error in concurrent processing: {str(result)}")
+            else:
+                final_results.append(result)
+        
+        # Clean up temp files
+        for file_path in file_paths:
             try:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                    print(f"Cleaned up temporary file: {temp_path}")
+                os.remove(file_path)
             except Exception as e:
-                print(f"Error cleaning up temporary file {temp_path}: {str(e)}") 
+                print(f"Error removing temp file {file_path}: {str(e)}")
+        
+        return final_results
+    except Exception as e:
+        print(f"Error in submission processing: {str(e)}")
+        raise e 
