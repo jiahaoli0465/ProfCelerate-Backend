@@ -105,10 +105,6 @@ async def process_pdf_with_mistral(file_path):
             print(f"Fallback text extraction failed: {str(fallback_error)}")
             return "Failed to extract content from PDF."
 
-async def process_with_mistral(text_content):
-    """Process text content with Mistral AI."""
-    return await mistral_processor.process_text(text_content)
-
 async def grade_with_deepseek(content, grading_criteria, total_points_available):
     """Grade content using DeepSeek's API."""
     return await deepseek_grader.grade_submission(content, grading_criteria, float(total_points_available))
@@ -201,9 +197,7 @@ async def process_submission(files, grading_criteria, submission_id, total_point
                 try:
                     with open(text_file, 'r', encoding='utf-8') as f:
                         text_content = f.read()
-                    # Process with Mistral if needed
-                    # processed_text = await process_with_mistral(text_content)
-                    # For now, just use the raw text
+
                     text_contents[os.path.basename(text_file)] = text_content
                 except Exception as e:
                     print(f"Error processing text file {text_file}: {str(e)}")
@@ -214,11 +208,6 @@ async def process_submission(files, grading_criteria, submission_id, total_point
         if not all_contents:
             raise ValueError("No content could be extracted from any files")
 
-        # try:
-        #     processed_contents = await mistral_processor.process_texts_batch(all_contents)
-        # except Exception as e:
-        #     print(f"Error in batch text processing: {str(e)}")
-        #     processed_contents = all_contents  # Use original content if processing fails
         processed_contents = all_contents
 
         # Helper function to grade and store a single file
